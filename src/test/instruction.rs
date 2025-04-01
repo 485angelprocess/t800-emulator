@@ -1,6 +1,6 @@
 #[cfg(test)]
-mod tests{
-    use crate::{mem::Mem, proc::{DirectOp, Flag, Proc}};
+mod direct{
+    use crate::{mem::Mem, proc::{DirectOp, ProcState, Flag, Proc}};
     
     #[test]
     fn load_constant(){
@@ -142,4 +142,130 @@ mod tests{
         assert!(p.peek(0) == 12);
         assert!(p.peek(1) == 10);
     }
+
+    #[test]
+    fn adjust_workspace(){
+        let mut p = Proc::new(Mem::new());
+        p.set_workspace_pointer(1000);
+        assert!(p.workspace_pointer() == 1000);
+        p.run(DirectOp::AJW, -2);
+        assert!(p.workspace_pointer() == 992);
+        p.run(DirectOp::AJW, 2);
+        assert!(p.workspace_pointer() == 1000);
+    }
+    
+    #[test]
+    fn prefix(){
+        let mut p = Proc::new(Mem::new());
+        
+        p.run(DirectOp::PFIX, 4);
+        p.run(DirectOp::PFIX, 3);
+        p.run(DirectOp::PFIX, 2);
+        p.run(DirectOp::LDC, 1);
+        assert!(p.peek(0) == 0x4321);
+        
+        p.run(DirectOp::NFIX, 1);
+        p.run(DirectOp::LDC, 1);
+        println!("Value of A is {}", p.peek(0));
+        assert!(p.peek(0) == -31);
+    }
+
+    #[test]
+    fn jump(){
+        let mut p = Proc::new(Mem::new());
+        p.run(DirectOp::JUMP, 2);
+        assert!(p.program_counter() == 3);
+        p.run(DirectOp::JUMP, 1);
+        assert!(p.program_counter() == 5);
+        assert!(p.state() == ProcState::IDLE);
+    }
+    
+    #[test]
+    fn conditional(){
+        let mut p = Proc::new(Mem::new());
+        
+        // Run three programs and don't jump
+        p.run(DirectOp::LDC, 1);
+        p.run(DirectOp::EQC, 1);
+        assert!(p.peek(0) == 1);
+        p.run(DirectOp::CJ, 4);
+        assert!(p.program_counter() == 3);
+        
+        // Run three instruction and then jump
+        p.run(DirectOp::LDC, 2);
+        p.run(DirectOp::EQC, 1);
+        assert!(p.peek(0) == 0);
+        assert!(p.program_counter() == 5);
+        p.run(DirectOp::CJ, 4);
+        println!("Program counter {}", p.program_counter());
+        assert!(p.program_counter() == 10);
+    }
 }
+
+mod indirect{
+    use crate::{mem::Mem, proc::{DirectOp, ProcState, Flag, Proc}};
+    
+    #[test]
+    fn reverse(){
+        let mut p = Proc::new(Mem::new());
+        
+        p.poke(0, 11);
+        p.poke(1, 13);
+        // run reverse
+        p.run(DirectOp::OPR, 0);
+        
+        assert!(p.peek(0) == 13);
+        assert!(p.peek(1) == 11);
+    }
+    
+    #[test]
+    fn add(){
+        // A = A + B,
+        // If overflow set error
+        let mut p = Proc::new(Mem::new());
+        
+        p.poke(0, 5);
+        p.poke(1, 7);
+        p.poke(2, 9);
+        
+        p.run(DirectOp::PFIX, 0);
+        p.run(DirectOp::OPR, 5);
+        
+        assert!(p.peek(0) == 12);
+        assert!(p.peek(1) == 9);
+        
+        assert!(p.flag(Flag::ERROR) == false);
+        
+        // Overflow
+        p.poke(0, 2_147_483_647);
+        p.run(DirectOp::PFIX, 0);
+        p.run(DirectOp::OPR, 5);
+        
+        assert!(p.flag(Flag::ERROR) == true);
+    }
+    
+    #[test]
+    fn alt(){
+        let mut p = Proc::new(Mem::new());
+        
+        p.run(DirectOp::PFIX, 4);
+        p.run(DirectOp::OPR, 3);
+        
+    }
+    
+    #[test]
+    fn and(){
+        let mut p = Proc::new(Mem::new());
+        
+        p.poke(0, 0b011111);
+        p.poke(1, 0b101010);
+        p.poke(2, 15);
+        
+        p.run(DirectOp::PFIX, 0x4);
+        p.run(DirectOp::OPR, 0xB);
+        
+        assert!(p.peek(0) == 0b001010);
+        assert!(p.peek(1) == 15);
+    }
+}
+

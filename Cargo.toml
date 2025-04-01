@@ -1,5 +1,5 @@
 [package]
-name = "assembler-tp"
+name = "t800-emulator"
 version = "0.1.0"
 edition = "2021"
 

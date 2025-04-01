@@ -60,6 +60,23 @@ impl Stack{
         c[0] = value;
     }
     
+    pub fn pop(&mut self) -> i32{
+        let mut c = self.reg.borrow_mut();
+        
+        let v = c[0];
+        c[0] = c[1];
+        c[1] = c[2];
+        v
+    }
+    
+    pub fn swap(&mut self){
+        // Swap A and B registers
+        let mut c = self.reg.borrow_mut();
+        let a = c[0];
+        c[0] = c[1];
+        c[1] = a;
+    }
+    
     pub fn a(&self) -> i32{
         self.reg.borrow()[0].clone()
     }

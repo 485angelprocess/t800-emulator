@@ -4,7 +4,6 @@ type RTYPE = i32;
 type ATYPE = i32;
 const MASK: u32 = 0xFFFFFFF0;
 
-#[derive(Debug)]
 pub enum DirectOp{
     JUMP, // j Jump
     LDLP, // jdlp load local pointer
@@ -24,17 +23,24 @@ pub enum DirectOp{
     OPR,  // operate
 }
 
+pub enum IndirectOp{
+    REV
+}
+
 pub enum Flag{
     ERROR
 }
 
 fn mask4(v: RTYPE) -> RTYPE{
-    v << 4 >> 4
+    (v << 4) >> 4
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum ProcState{
     ACTIVE,
+    ENABLING,
+    WAITING,
+    READY,
     IDLE
 }
 
@@ -94,7 +100,9 @@ impl Proc{
     }
     
     fn neg_prefix(&mut self, value: RTYPE){
-        self.operand = -1 * (mask4(self.operand) + value);
+        // complement
+        self.operand = !(mask4(self.operand) + value);
+        // shift up
         self.operand = self.operand << 4;
     }
     
@@ -138,7 +146,7 @@ impl Proc{
         // if value is negative, this allocates more memory
         // if vlaue is postive, this dellocates memry
         self.operand = mask4(self.operand) + value;
-        self.workspace = self.workspace + self.operand;
+        self.workspace = self.workspace + (self.operand << 2);
         self.operand = 0;
     }
             
@@ -168,7 +176,13 @@ impl Proc{
     fn cj(&mut self, value: RTYPE){
         // Jumps if A is zero
         if self.stack.a() == 0{
-            self.jump(value);
+            self.operand = mask4(self.operand) + value;
+            self.pc += self.operand;
+            self.operand = 0;
+            // IDLES?
+        }
+        else{
+            self.stack.pop();
         }
     }
             
@@ -180,6 +194,73 @@ impl Proc{
         else{
             self.stack.push(0);
         }
+        self.operand = 0;
+    }
+            
+    fn operate(&mut self, value: i32){
+        let group = self.operand >> 4;
+        match group{
+            0x0 => self.indirect_0(value),
+            0x4 => self.indirect_4(value),
+            _ => panic!("Unimplemented indirect family: {}", self.operand)
+        }
+        self.operand = 0;
+    }
+                            
+    /**********Indirect instructions *********/
+    fn indirect_0(&mut self, value: i32){
+        match value{
+            0x0 => self.reverse(),
+            0x5 => self.add(),
+            _ => panic!("Unimplemented command for indirect family 0, {}", value)
+        }
+    }
+    
+    fn indirect_4(&mut self, value: i32){
+        match value{
+            0x3 => self.alt(),
+            0x4 => self.alt_wait(),
+            0x5 => self.alt_end(),
+            0xB => self.logical_and(),
+            _ => panic!("Unimplemented command for indirect family 4 (alt): {}", value)
+        }
+    }
+    
+    fn reverse(&mut self){
+        // Swap A and B registers
+        self.stack.swap();
+    }
+    
+    fn add(&mut self){
+        let a = self.stack.a();
+        let b = self.stack.b();
+        if let Some(result) = a.checked_add(b){
+            self.stack.set(0, result);
+        }
+        else{
+            self.stack.set(0, a.wrapping_add(b));
+            self.error = true;
+        }
+        self.stack.set(1, self.stack.c());
+    }
+     
+    fn logical_and(&mut self){
+        // A equals the bitwise AND of A and B
+        self.stack.set(0, self.stack.a() & self.stack.b());
+        self.stack.set(1, self.stack.c());
+    }
+     
+    // Alt mode managements       
+    fn alt(&mut self){
+        panic!("Alt command not implemented");
+    }
+
+    fn alt_wait(&mut self){
+        panic!("Alt wait not implemented");
+    }
+            
+    fn alt_end(&mut self){
+        panic!("Alt command not implemented");
     }
             
     /********** Debug methods ***********/
@@ -201,16 +282,25 @@ impl Proc{
         self.stack.set(index, value);
     }
     
+    pub fn program_counter(&self) -> ATYPE{
+        self.pc
+    }
+    
+    pub fn workspace_pointer(&self) -> ATYPE{
+        self.workspace
+    }
+    
     pub fn report_state(&self){
         println!("Register contents");
         for i in 0..STACK_SIZE{
             println!("Reg {}: {}", i, self.stack.get(i));
         }
     }
-    
+     
     /********* run instruction *****************/ 
     pub fn run(&mut self, op: DirectOp, value: RTYPE){
         self.state = ProcState::ACTIVE;
+        self.pc += 1; // Increment program counter
         match op{
             // Load constant pushes constant into stack 0
             DirectOp::LDC  => self.ldc(value), // load constant
@@ -228,11 +318,11 @@ impl Proc{
             DirectOp::CJ   => self.cj(value),
             DirectOp::CALL => self.call(value),
             DirectOp::EQC  => self.eqc(value),
-            _ => panic!("Instruction not implemented {:#?}", op)
+            DirectOp::OPR  => self.operate(value),
         }
     }
     
-    pub fn poll(&self) -> ProcState{
+    pub fn state(&self) -> ProcState{
         self.state
     }
 }
