@@ -6,6 +6,6 @@ The T800 is based on RISC and embedded systems, and was made in the 90s by INMOS
 
 Debugger using `tui-rs`:
 
-![](./images/debugger.png)
+![](images/debugger.png)
 
 I've implemented all the direct instructions and am now going through the indirect ones, then will add the process manager.
