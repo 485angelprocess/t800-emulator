@@ -203,6 +203,8 @@ mod direct{
 }
 
 mod indirect{
+    use std::{iter::zip, ops::Deref};
+
     use crate::{mem::Mem, proc::{DirectOp, ProcState, Flag, Proc}};
     
     #[test]
@@ -255,6 +257,7 @@ mod indirect{
     
     #[test]
     fn and(){
+        // Perform logical and of register a and b
         let mut p = Proc::new(Mem::new());
         
         p.poke(0, 0b011111);
@@ -265,7 +268,254 @@ mod indirect{
         p.run(DirectOp::OPR, 0xB);
         
         assert!(p.peek(0) == 0b001010);
+        // Copies C into B
         assert!(p.peek(1) == 15);
+    }
+    
+    #[test]
+    fn byte_count(){
+        // Test BCNT
+        let mut p = Proc::new(Mem::new());
+        
+        p.poke(0, 5);
+        p.poke(1, 11);
+        
+        // 0x23 0xF4
+        p.run(DirectOp::PFIX, 0x3);
+        p.run(DirectOp::OPR, 0x4);
+        
+        assert!(p.peek(0) == 20);
+        assert!(p.peek(1) == 11);
+    }
+    
+    #[test]
+    fn bit_counts(){
+        // Test BITCNT 
+        // 0x27 F6
+        let mut p = Proc::new(Mem::new());
+        
+        p.poke(0, 0b10101);
+        p.poke(1, 7);
+        p.poke(2, 11);
+        
+        p.run(DirectOp::PFIX, 0x7);
+        p.run(DirectOp::OPR, 0x6);
+        
+        assert!(p.peek(0) == 10);
+        assert!(p.peek(1) == 11);
+    }
+    
+    #[test]
+    fn bit_rev_n_bits(){
+        // Test bit reverse
+        // reverses n bits of B
+        let mut p = Proc::new(Mem::new());
+        p.poke(0, 4); // number of bits to reverse
+        p.poke(1, 0b1010_0101);
+        p.poke(2, 13);
+        
+        p.run(DirectOp::PFIX, 0x7);
+        p.run(DirectOp::OPR, 0x8);
+        
+        assert!(p.peek(0) == 0b1010_1010);
+        assert!(p.peek(1) == 13);
+    }
+    
+    #[test]
+    fn bit_rev_word(){
+        let mut p = Proc::new(Mem::new());
+        
+        p.poke(0, 0x12345678);
+        
+        p.run(DirectOp::PFIX, 0x7);
+        p.run(DirectOp::OPR, 0x7);
+        
+        assert!(p.peek(0) == 0x1E6A2C48);
+    }
+    
+    #[test]
+    fn bsub(){
+        let mut p = Proc::new(Mem::new());
+        
+        p.poke(0, 13);
+        p.poke(1, 15);
+        p.poke(2, 17);
+        p.run(DirectOp::OPR, 0x2);
+        
+        assert!(p.peek(0) == 28);
+        assert!(p.peek(1) == 17);
+    }
+    
+    #[test]
+    fn ccnt1(){
+        let mut p = Proc::new(Mem::new());
+        
+        
+        // Case B == 0, sets error
+        p.poke(0, 10);
+        p.poke(1, 0);
+        p.poke(2, 5);
+        
+        p.run(DirectOp::PFIX, 0x4);
+        p.run(DirectOp::OPR, 0xD);
+        
+        assert!(p.peek(0) == 0);
+        assert!(p.peek(1) == 5);
+        
+        assert!(p.flag(Flag::ERROR) == true);
+        p.clear();
+        
+        // Case B < A and B > 0, error is not set
+        p.poke(0, 10);
+        p.poke(1, 1);
+        p.poke(2, 5);
+        
+        p.run(DirectOp::PFIX, 0x4);
+        p.run(DirectOp::OPR, 0xD);
+        
+        assert!(p.peek(0) == 1);
+        assert!(p.peek(1) == 5);
+        
+        assert!(p.flag(Flag::ERROR) == false);
+        p.clear();
+        
+        // Case B > A, error is set
+        p.poke(0, 10);
+        p.poke(1, 100);
+        p.poke(2, 5);
+        
+        p.run(DirectOp::PFIX, 0x4);
+        p.run(DirectOp::OPR, 0xD);
+        
+        assert!(p.peek(0) == 100);
+        assert!(p.peek(1) == 5);
+        
+        assert!(p.flag(Flag::ERROR) == true);
+        p.clear();
+        
+        p.poke(0, -12);
+        p.poke(1, 1);
+        p.poke(2, 5);
+        
+        p.run(DirectOp::PFIX, 0x4);
+        p.run(DirectOp::OPR, 0xD);
+        
+        assert!(p.peek(0) == 1);
+        assert!(p.peek(1) == 5);
+        
+        assert!(p.flag(Flag::ERROR) == false);
+        p.clear();
+    }
+    
+    #[test]
+    fn clrhalterr(){
+        let mut p = Proc::new(Mem::new());
+        
+        // Case B == 0, sets error
+        p.poke(0, 10);
+        p.poke(1, 0);
+        p.poke(2, 5);
+        
+        p.run(DirectOp::PFIX, 0x4);
+        p.run(DirectOp::OPR, 0xD);
+        
+        assert!(p.peek(0) == 0);
+        assert!(p.peek(1) == 5);
+        
+        assert!(p.state() == ProcState::HALTED);
+        p.clear();
+        
+        // Case B == 0, sets error
+        p.poke(0, 10);
+        p.poke(1, 0);
+        p.poke(2, 5);
+        
+        p.run(DirectOp::PFIX, 0x2);
+        p.run(DirectOp::OPR, 0x7);
+        
+        p.run(DirectOp::PFIX, 0x4);
+        p.run(DirectOp::OPR, 0xD);
+        
+        assert!(p.peek(0) == 0);
+        assert!(p.peek(1) == 5);
+        
+        assert!(p.state() == ProcState::ACTIVE);
+        p.clear();
+    }
+    
+    #[test]
+    fn check_single(){
+        let ab: Vec<i64> = vec![15, 0x1_FFFF_FFFF, -15, -1 * 0x1_FFFF_FFFF];
+        let error: Vec<bool> = vec![false, true, false, true];
+        
+        let mut p = Proc::new(Mem::new());
+        
+        for (input, err) in ab.iter().zip(error.iter()){
+            let i = input.clone() as u64;
+            let a = (i & 0xFFFF_FFFF) as i32;
+            let b = ((i >> 32) & 0xFFFF_FFFF) as i32;
+            p.poke(0, a);
+            p.poke(1, b);
+            
+            p.run(DirectOp::PFIX, 0x4);
+            p.run(DirectOp::OPR, 0xC);
+            
+            if *err{
+                assert!(p.state() == ProcState::HALTED);
+            }
+            else{
+                assert!(p.state() == ProcState::ACTIVE);
+            }
+            p.clear();
+        }
+    }
+    
+    #[test]
+    fn check_subscript_from_zero(){
+        let a_cases = vec![11, 11, 11];
+        let b_cases = vec![8, 11, 15];
+        let expect = vec![false, true, true];
+        
+        let mut p = Proc::new(Mem::new());
+        
+        for ((a, b), err) in a_cases.iter().zip(b_cases.iter()).zip(expect.iter()){
+            p.poke(0, *a);
+            p.poke(1, *b);
+            
+            p.run(DirectOp::PFIX, 0x1);
+            p.run(DirectOp::OPR, 0x3);
+            
+            if *err{
+                assert!(p.state() == ProcState::HALTED);
+            }
+            else{
+                assert!(p.state() == ProcState::ACTIVE);
+            }
+        }
+    }
+    
+    #[test]
+    fn check_word(){
+        let a_cases = vec![16, 16, 16, 16, 16]; // word size
+        let b_cases = vec![11, 16, 20, -11, -20]; // test
+        let expect = vec![false, true, true, false, true];
+        
+        let mut p = Proc::new(Mem::new());
+        
+        for ((a, b), err) in a_cases.iter().zip(b_cases.iter()).zip(expect.iter()){
+            p.poke(0, *a);
+            p.poke(1, *b);
+            
+            p.run(DirectOp::PFIX, 0x5);
+            p.run(DirectOp::OPR, 0x6);
+            
+            if *err{
+                assert!(p.state() == ProcState::HALTED);
+            }
+            else{
+                assert!(p.state() == ProcState::ACTIVE);
+            }
+        }
     }
 }
 
