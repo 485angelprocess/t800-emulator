@@ -2,6 +2,10 @@ use std::io::Error;
 
 use crate::mem::{Mem, Stack, STACK_SIZE};
 
+mod workspace;
+
+use workspace::WorkspaceCache;
+
 type RTYPE = i32;
 type ATYPE = i32;
 
@@ -33,32 +37,73 @@ pub enum Flag{
     ERROR
 }
 
-fn mask4(v: RTYPE) -> RTYPE{
-    (v << 4) >> 4
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum ProcState{
-    ACTIVE,
-    ENABLING,
-    WAITING,
-    READY,
-    IDLE,
-    HALTED
-}
-
-struct ProcFlag{
-    pub error: bool,
-    pub halt_on_error: bool
+pub struct ProcFlag{
+    go_to_snp: bool,
+    io: bool,
+    move_bit: bool,
+    time_del: bool,
+    time_ins: bool,
+    dist_and_ins: bool,
+    error : bool,
+    halt_on_error: bool
 }
 
 impl Default for ProcFlag{
     fn default() -> Self {
         Self{
+            go_to_snp: false,
+            io: false,
+            move_bit: false,
+            time_del: false,
+            time_ins: false,
+            dist_and_ins: false,
             error: false,
             halt_on_error: true
         }
     }
+}
+
+impl ProcFlag{
+    fn get_state(&self) -> ProcState{
+        if self.halt_on_error & self.error{
+            return ProcState::HALTED;
+        }
+        if self.go_to_snp{
+            return ProcState::IDLE;
+        }
+        return ProcState::ACTIVE;
+    }
+    
+    fn deschedule(&mut self){
+        self.go_to_snp = true;
+    }
+    
+    fn set_error(&mut self){
+        self.error = true;
+    }
+    
+    fn clear(&mut self){
+        self.go_to_snp = false;
+        self.error = false;
+        self.io = false;
+        self.move_bit = false;
+        self.time_del = false;
+        self.time_ins = false;
+        self.dist_and_ins = false;
+        self.halt_on_error = true;
+    }
+}
+
+fn mask4(v: RTYPE) -> RTYPE{
+    (v << 4) >> 4
+}
+
+// TODO move to stat
+#[derive(Clone, Copy, PartialEq)]
+pub enum ProcState{
+    ACTIVE,
+    IDLE,
+    HALTED
 }
 
 pub struct Proc{
@@ -67,7 +112,7 @@ pub struct Proc{
     workspace: ATYPE,
     operand:  RTYPE,
     flag: ProcFlag,
-    state: ProcState,
+    cache: WorkspaceCache,
     mem: Mem
 }
 
@@ -79,38 +124,28 @@ impl Proc{
             workspace: 0,
             operand: 0,
             flag: ProcFlag::default(),
-            state: ProcState::ACTIVE,
+            cache: WorkspaceCache::new(m.clone()),
             mem: m
         }
     }
     
     /// Set process to idle
     fn deschedule(&mut self){
-        self.state = ProcState::IDLE;
-    }
-    
-    /// Stops process operation
-    fn halt(&mut self){
-        self.state = ProcState::HALTED;
+        self.flag.deschedule();
     }
     
     /// Set error flag, halts if HaltOnError set
     fn set_error(&mut self){
-        self.flag.error = true;
-        if self.flag.halt_on_error{
-            self.halt();
-        }
+        self.flag.set_error();
     }
     
     /*********Instructions ***********/
     /// Load constant
     fn ldc(&mut self, value: RTYPE){
         // LDC instruction
-        // Note check how lowest nibble works here
         self.operand = mask4(self.operand) + value;
         self.stack.push(self.operand);
         self.operand = 0;
-        // this should only be pushing 4 bits, but does it clear upper bits
     }
     
     /// Add constant
@@ -229,7 +264,6 @@ impl Proc{
             self.operand = mask4(self.operand) + value;
             self.pc += self.operand;
             self.operand = 0;
-            // IDLES?
         }
         else{
             self.stack.pop();
@@ -269,6 +303,7 @@ impl Proc{
         match value{
             0x0 => self.reverse(),
             0x2 => self.byte_subscript(),
+            0x4 => self.diff(),
             0x5 => self.add(),
             _ => panic!("Unimplemented command for indirect family 0, {:#01X}", value)
         }
@@ -284,6 +319,7 @@ impl Proc{
     fn indirect_2(&mut self, value: i32){
         match value{
             0x7 => self.clear_halt_error(),
+            0xC => self.div(),
             _ => panic!("Unimplented command for indirect family 2: {:#01X}", value)
         }
     }
@@ -310,6 +346,7 @@ impl Proc{
     fn indirect_5(&mut self, value: i32){
         match value{
             0x6 => self.check_word(),
+            0xA => self.dup(),
             _ => panic!("Unimplemented command for indirect family 5: {:#01X}", value)
         }
     }
@@ -480,18 +517,62 @@ impl Proc{
         self.stack.set(1, self.stack.c());
     }
     
+    /// DIFF 0xF4
+    /// Gets the difference of B - A, and pops C into B
+    fn diff(&mut self){
+        self.stack.set(0, self.stack.b() - self.stack.a());
+        self.stack.set(1, self.stack.c());
+    }
+    
+    /// DIV 0x22 0xFC
+    /// Divide, error is set on division by 0
+    fn div(&mut self){
+        if self.stack.a() == 0{
+            // divide by 0
+            self.set_error();
+            return;
+        }
+        if self.stack.a() == -1 && self.stack.b() == i32::MIN{
+            // This is an overflow case
+            self.set_error();
+            return;
+        }
+        self.stack.set(0, self.stack.b() / self.stack.a());
+        self.stack.set(1, self.stack.c());
+    }
+    
+    /// DUP 0x25 0xFA
+    /// Duplicates top of stack
+    fn dup(&mut self){
+        self.stack.set(2, self.stack.b());
+        self.stack.set(1, self.stack.a());
+        
+        // Throw warning if trying to emulate the T414
+    }
+    
+    /// ENBC Enable channel 0x24 0xF8
+    /// Enables a channel pointed to by B, only if Ais one
+    /// a) no process on channel B, store the current process workspace
+    ///     into the channel to start communication
+    /// b) the current process is waiting on channel B, do nothing
+    /// c) another process is waiting, ready flag is stored at workspace -3, C is popped into B
+    fn enbc(&mut self){
+        if self.stack.a() != 0{ // unclear what logical TRUE is
+            todo!("Enable channel not implemented");
+        }
+    }
+    
     /// CFLERR Check single FP Inf or NaN T313
-       
     fn logical_and(&mut self){
         // A equals the bitwise AND of A and B
         self.stack.set(0, self.stack.a() & self.stack.b());
         self.stack.set(1, self.stack.c());
     }
     
-    // Control operation
+    /// RET
+    /// Control operation
+    /// Returns the execution flow from a subroutine back to the calling thread of execution
     fn ret(&mut self){
-        // Returns the execution flow from a subroutine back to the calling thread of execution
-        
         // Load program counter and register space from stack
         self.pc = self.mem.read(self.workspace);
         self.stack.set(0, self.mem.read(self.workspace + 4));
@@ -502,36 +583,31 @@ impl Proc{
         self.workspace = self.workspace + 12;
     }
     
+    /// LDPI Load pointer to instruction adds the current value of the instruction pointer to A
     fn ldpi(&mut self){
-        // LDPI Load pointer to instruction adds the current value of the instruction pointer to A
+        
         self.stack.set(0, self.stack.a() + self.pc);
     }
     
+    /// GAJW General adjust workspace exchanges the contents of the workspace pointer and A. A should be word-aligned.
     fn gajw(&mut self){
-        // GAJW General adjust workspace exchanges the contents of the workspace pointer and A. A should be word-aligned.
         let wp = self.workspace;
         self.workspace = self.stack.a();
         if self.workspace % 4 > 0{
-            dbg!("Warning: GAJW set workspace to {}, which is not word-aligned", self.workspace);
+            println!("Warning: GAJW set workspace to {}, which is not word-aligned", self.workspace);
         }
         self.stack.set(0, wp);
     }
     
-    fn dup(&mut self){
-        // DUP Duplicate top of stack duplicates the contents of A into B.
-        self.stack.set(1, self.stack.a());
-        // TODO warning or error
-        // The DUP instruction is available on the T800 and not the T414
-    }
-    
+    /// GCALL
+    /// General call exchanges the contents of the instruction pointer and A
+    /// Execution then continues at the new address formerly contained in A
+    /// This can be used to generate a subroutine call at run time by:
+    ///  1. Build a stack frame like CALL
+    ///  2. Load A with the address of the subroutine
+    ///  3. Execute GCALL
     fn gcall(&mut self){
-        // GCALL
-        // General call exchanges the contents of the instruction pointer and A
-        // Execution then continues at the new address formerly contained in A
-        // This can be used to generate a subroutine call at run time by:
-        //  1. Build a stack frame like CALL
-        //  2. Load A with the address of the subroutine
-        //  3. Execute GCALL
+        
         let pc = self.pc;
         self.pc = self.stack.a();
         self.stack.set(0, pc);
@@ -567,7 +643,7 @@ impl Proc{
     }
             
     /********** Debug methods ***********/
-    pub fn peek(&self, index: usize) -> RTYPE{
+    pub fn get_reg(&self, index: usize) -> RTYPE{
         self.stack.get(index)
     }
     
@@ -585,7 +661,7 @@ impl Proc{
         self.flag.error = false;
     }
     
-    pub fn poke(&mut self, index: usize, value: RTYPE){
+    pub fn set_reg(&mut self, index: usize, value: RTYPE){
         self.stack.set(index, value);
     }
     
@@ -614,7 +690,6 @@ impl Proc{
      
     /********* run instruction *****************/ 
     pub fn run(&mut self, op: DirectOp, value: RTYPE) -> Result<(), Error>{
-        self.state = ProcState::ACTIVE;
         self.pc += 1; // Increment program counter
         match op{
             // Load constant pushes constant into stack 0
@@ -639,6 +714,6 @@ impl Proc{
     }
     
     pub fn state(&self) -> ProcState{
-        self.state
+        self.flag.get_state()
     }
 }

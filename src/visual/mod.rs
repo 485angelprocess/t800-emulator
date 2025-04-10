@@ -11,7 +11,9 @@ use tui::{style::{Color, Style}, widgets::{Row, Table}};
 
 /* Making a cute visualizer for processor state */
 use crate::{mem::Mem, proc::Proc, DirectOp};
-use crate::strings;
+mod strings;
+
+
 
 const COLOR_STANDARD: Color = Color::Rgb(255, 255, 255);
 const COLOR_ACTIVE: Color = Color::Rgb(255, 100, 100);
@@ -174,7 +176,7 @@ impl IntEntry{
 }
 
 impl RowEntry for IntEntry{
-    fn as_row(&self, number: usize, active: bool) -> Row {
+    fn as_row(&self, _number: usize, _active: bool) -> Row {
         Row::new(vec![
             self.label.clone(),
             format!("{:#08X}", self.value)
@@ -197,7 +199,7 @@ impl MemoryEntry{
 }
 
 impl RowEntry for MemoryEntry{
-    fn as_row(&self, number: usize, active: bool) -> Row {
+    fn as_row(&self, _number: usize, active: bool) -> Row {
         if active{
             return Row::new(vec![
                 format!("{:#08X}", self.address),
@@ -271,9 +273,9 @@ impl Stack{
     }
 
     fn update(&mut self, p: &Proc){
-        self.table.contents[0].value = p.peek(0);
-        self.table.contents[1].value = p.peek(1);
-        self.table.contents[2].value = p.peek(2);
+        self.table.contents[0].value = p.get_reg(0);
+        self.table.contents[1].value = p.get_reg(1);
+        self.table.contents[2].value = p.get_reg(2);
     }
 }
 
@@ -436,7 +438,7 @@ impl ProcessorTui{
     fn run_checked(&mut self, pc: usize) -> bool{
         let op = self.instructions.contents[pc].operation;
         let value = self.instructions.contents[pc].value;
-        if let Err(e) = self.proc.run(op, value){
+        if let Err(_e) = self.proc.run(op, value){
             // TODO print error
             return false;
         }

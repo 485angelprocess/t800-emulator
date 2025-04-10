@@ -2,6 +2,22 @@ use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 use std::cell::RefCell;
+/*
+const LINK0_OUTPUT: i32 = 0x8000_0000;
+const LINK1_OUTPUT: i32 = 0x8000_0004;
+const LINK2_OUTPUT: i32 = 0x8000_0008;
+const LINK3_OUTPUT: i32 = 0x8000_000C;
+const LINK0_INPUT: i32  = 0x8000_0010;
+const LINK1_INPUT: i32  = 0x8000_0014;
+const LINK2_INPUT: i32  = 0x8000_0018;
+const LINK3_INPUT: i32  = 0x8000_001C;
+const EVENT_CHANNEL: i32= 0x8000_0020;
+const HIGH_POINTER: i32 = 0x8000_0024;
+const LOW_POINTER: i32  = 0x8000_0028;
+const LOW_WORKSPACE:i32 = 0x8000_002C;
+*/
+
+
 
 pub struct Mem{
     contents: Rc<RefCell<HashMap<i32, i32>>>
@@ -77,22 +93,30 @@ impl Stack{
         c[1] = a;
     }
     
+    /// Register A
     pub fn a(&self) -> i32{
         self.reg.borrow()[0].clone()
     }
     
+    /// Register B
     pub fn b(&self) -> i32{
         self.reg.borrow()[1].clone()
     }
     
+    /// Register C
     pub fn c(&self) -> i32{
         self.reg.borrow()[2].clone()
     }
     
+    
+    /// Get register value via index
+    /// 0 - A, 1 - B, 2 - C
     pub fn get(&self, index: usize) -> i32{
         self.reg.borrow()[index].clone()
     }
     
+    /// Set register via index
+    /// 0 - A, 1 - B, 2 - C
     pub fn set(&self, index: usize, value: i32){
         self.reg.borrow_mut()[index] = value;
     }

@@ -9,10 +9,11 @@ use std::io;
 mod proc;
 mod mem;
 mod test;
-mod algorithm;
 mod visual;
-mod strings;
 mod parse;
+mod scheduler;
+
+mod channel;
 
 fn main()  -> Result<(), io::Error> {
     println!("Hello, world!");
