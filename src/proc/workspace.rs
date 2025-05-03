@@ -3,10 +3,20 @@ use crate::mem::Mem;
 
 pub struct EventState{}
 
+pub const NOT_PROCESS_P: i32 = -1; // Pretty sure it's -1
+pub const MOST_NEG: i32 = i32::MIN;
+
 impl EventState{
     pub const ENABLING: i32 = i32::MIN + 1;
     pub const WAITING: i32  = i32::MIN + 2;
     pub const READY: i32    = i32::MIN + 3;
+}
+
+pub struct ProcPriority{}
+
+impl ProcPriority{
+    pub const HIGH: i32 = 1;
+    pub const LOW: i32 = 0;
 }
 
 pub struct WorkspaceCache{
@@ -15,11 +25,11 @@ pub struct WorkspaceCache{
 
 impl WorkspaceCache{
     const GUARD: i32 = 0;
-    const IPTR: i32 = -1; // Instruction pointer
-    const LINK: i32 = -2; // Workspace descriptior of next process in queue
-    const STATE: i32= -3; // Flag indicating alternation state
-    const TLINK: i32= -4; // Time value reached flag
-    const TIME: i32 = -5; // time process watiing to awaken at
+    const IPTR: i32 = -4; // Instruction pointer
+    const LINK: i32 = -8; // Workspace descriptior of next process in queue
+    const STATE: i32= -12; // Flag indicating alternation state
+    const TLINK: i32= -16; // Time value reached flag
+    const TIME: i32 = -20; // time process watiing to awaken at
     
     pub fn new(mem: Mem) -> Self{
         Self{

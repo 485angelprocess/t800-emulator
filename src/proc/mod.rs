@@ -4,7 +4,7 @@ use crate::mem::{Mem, Stack, STACK_SIZE};
 
 mod workspace;
 
-use workspace::WorkspaceCache;
+use workspace::{EventState, ProcPriority, WorkspaceCache, MOST_NEG, NOT_PROCESS_P};
 
 type RTYPE = i32;
 type ATYPE = i32;
@@ -106,11 +106,41 @@ pub enum ProcState{
     HALTED
 }
 
+struct Params{
+    pub fptr: [RTYPE; 2],
+    pub bptr: [RTYPE; 2],
+    pub tptr: [RTYPE; 2],
+    pub timeslice: i32,
+    pub interrupt: bool,
+    
+}
+
+impl Params{
+    pub fn new() -> Self{
+        Params{
+            fptr: [NOT_PROCESS_P; 2],
+            bptr: [NOT_PROCESS_P; 2],
+            tptr: [NOT_PROCESS_P; 2],
+            timeslice: 0,
+            interrupt: false,
+        }
+    }
+}
+
 pub struct Proc{
     stack: Stack,
+    
+    // Main registers
     pc: ATYPE,
     workspace: ATYPE,
     operand:  RTYPE,
+    
+    // Internal variables
+    priority: RTYPE,
+    
+    // Additional registers
+    params: Params,
+    
     flag: ProcFlag,
     cache: WorkspaceCache,
     mem: Mem
@@ -123,6 +153,8 @@ impl Proc{
             pc: 0,
             workspace: 0,
             operand: 0,
+            priority: ProcPriority::LOW,
+            params: Params::new(),
             flag: ProcFlag::default(),
             cache: WorkspaceCache::new(m.clone()),
             mem: m
@@ -131,7 +163,151 @@ impl Proc{
     
     /// Set process to idle
     fn deschedule(&mut self){
-        self.flag.deschedule();
+        todo!("Deschedule action not implemented")
+    }
+    
+    fn start_process(&mut self){
+        todo!("Start process not implemented");
+    }
+    
+    /// Handle host link communication
+    fn host_link_handle(&mut self){
+        todo!("Host link communication not handleed");
+    }
+    
+    /// Checks when current process needs descheduling
+    /// Runs from 'j' and 'lend'
+    fn check_deschedule(&mut self){
+        self.host_link_handle();
+        
+        if self.params.timeslice > 1{
+            // Must change process
+            self.params.timeslice = 0;
+            
+            self.deschedule();
+            
+            self.start_process();
+        }
+    }
+    
+    fn interrupt(&mut self){
+       
+       // Sanity check, cannot already be doing an interrupt
+       if self.params.interrupt{
+           panic!("Error multiple interrupts of low priority processes :(");
+       }
+       
+       // Store my registers
+       // This is interrupt table locations,
+       // May want to rewrite this to be more generic
+       self.mem.write(MOST_NEG + (11 << 2), self.workspace | self.priority); // todo: check priority values
+       self.mem.write(MOST_NEG + (12 << 2), self.pc);
+       self.mem.write(MOST_NEG + (13 << 2), self.stack.a());
+       self.mem.write(MOST_NEG + (14 << 2), self.stack.b());
+       self.mem.write(MOST_NEG + (15 << 2), self.stack.c());
+       // In emulator, the status and error reg are commented out
+       // so leaving those out
+    }
+    
+    fn clear_timer(&mut self){
+        
+        // TODO write up so it's more clearly referencing timing link
+        let mut ptr = match self.priority{
+            ProcPriority::HIGH => {
+                while self.params.tptr[0] == self.workspace{
+                    // Time value reached flag
+                    self.params.tptr[0] = self.mem.read(self.workspace - 16);
+                }
+                
+                self.params.tptr[0]
+            }
+            ProcPriority::LOW => {
+                while self.params.tptr[1] == self.workspace{
+                    self.params.tptr[1] = self.mem.read(self.workspace - 16);
+                }
+                
+                self.params.tptr[1]
+            }
+            _ => panic!("Invalid process priority")
+        };
+        
+        let mut last_ptr = ptr;
+        while ptr != NOT_PROCESS_P{
+            if ptr == self.workspace{
+                ptr = self.mem.read(ptr - 16);
+                self.mem.write(last_ptr - 16, ptr);
+            }
+            else{
+                last_ptr = ptr;
+                ptr = self.mem.read(ptr - 16);
+            }
+        }
+    }
+    
+    /// Schedule new process
+    /// Add a process to the relevant priority queue
+    fn schedule(&mut self, wp: RTYPE, priority: RTYPE){
+        // Remove from timer queue if alt
+        let state = self.cache.get_state(wp);
+        if state == EventState::READY{
+            self.clear_timer();
+        }
+        
+        // If a high priority process is being scheduled,
+        // while a low priority process runs, interrupt
+        if priority == ProcPriority::HIGH && self.priority == ProcPriority::LOW{
+            self.interrupt();
+            
+            // Load new process
+            self.priority = ProcPriority::HIGH;
+            self.workspace = wp; // update workspace
+            self.pc = self.cache.get_iptr(self.workspace); // get program counter
+        }
+        else{
+            // Do not need to interrupt
+            
+            // Get front of process list pointer
+            let ptr = match priority{
+                ProcPriority::HIGH => self.params.fptr[0],
+                ProcPriority::LOW  => self.params.fptr[1],
+                _ => panic!("Invalid priority")
+            };
+            
+            if ptr == NOT_PROCESS_P{
+                // Empty process list, create
+                match priority{
+                    ProcPriority::HIGH => {
+                        self.params.fptr[0] = wp;
+                        self.params.bptr[0] = wp;
+                    },
+                    ProcPriority::LOW => {
+                        self.params.fptr[1] = wp;
+                        self.params.bptr[1] = wp;
+                    },
+                    _ => panic!("Invalid priority")
+                };
+            }
+            else{
+                // Process list already exists
+                
+                // Get workspace pointer of last process in list
+                let last_ptr = match priority{
+                    ProcPriority::HIGH => self.params.bptr[0],
+                    ProcPriority::LOW => self.params.bptr[1],
+                    _ => panic!("Invalid priority")
+                };
+                
+                // link new process onto end of list
+                self.cache.set_link(last_ptr, wp);
+                
+                // Update end of process list pointer
+                match priority {
+                    ProcPriority::HIGH => self.params.bptr[0] = wp,
+                    ProcPriority::LOW  => self.params.bptr[1] = wp,
+                    _ => panic!("Invalid priority")   
+                }
+            }
+        }
     }
     
     /// Set error flag, halts if HaltOnError set
@@ -139,7 +315,7 @@ impl Proc{
         self.flag.set_error();
     }
     
-    /*********Instructions ***********/
+    /*********Direct sInstructions ***********/
     /// Load constant
     fn ldc(&mut self, value: RTYPE){
         // LDC instruction
@@ -607,7 +783,6 @@ impl Proc{
     ///  2. Load A with the address of the subroutine
     ///  3. Execute GCALL
     fn gcall(&mut self){
-        
         let pc = self.pc;
         self.pc = self.stack.a();
         self.stack.set(0, pc);
@@ -629,19 +804,48 @@ impl Proc{
         todo!("CRC word not implemented")
     }
     
-    // Alt mode managements       
+    // Concurrent scheduling
+    /// Startp
+    /// Starts a new concurrent process
+    fn startp(&mut self){
+        let temp = self.stack.a();// & 0xfffffffe;
+        self.mem.write(temp - 4, self.pc + self.stack.b());
+        self.schedule(temp, self.priority);
+    }
+    
+    // Alt mode managements   
+    /// ALT 0x24 0xF3
+    /// Stores the flag Enabling.p in workspace location -3 (State.s)
+    /// Shows that the enabling of a ALT construct is occurring    
     fn alt(&mut self){
-        todo!("Alt command not implemented");
+        self.cache.set_state(self.workspace, EventState::ENABLING);
     }
-
-    fn alt_wait(&mut self){
-        todo!("Alt wait not implemented");
-    }
-            
+             
+    /// ALTEND 0x24 0xF5
+    /// Alt end is executed after the process containing ALT has been
+    /// rescheduled. Workspace location zero contains the offset
+    /// from the instruction pointer to the guard routine to execute
+    /// This offset is added to the instruction pointer
+    /// and execution continues at the appropriate guard's service routine
     fn alt_end(&mut self){
-        todo!("Alt command not implemented");
+        // The instruction counter is already at the location of the next instruction
+        self.pc = self.pc + self.cache.get_guard_offset(self.workspace);
     }
-            
+    
+    /// ALTWT 0x24 0xF4
+    /// Store -1 in workspace location 0, and waits until State.s is ready
+    /// Process is descheduled until one of the guards is ready
+    fn alt_wait(&mut self){
+        // From documentation:
+        // DisableStatus is defined to be Wptr[0]
+        self.mem.write(self.workspace, -1); // DisableStatus is set to -1
+        
+        if self.cache.get_state(self.workspace) != EventState::READY{
+            // Have to go back 2 because this is a operate instruction
+            self.pc -= 2; // loop (kinda annoying way to do this)
+        }
+    }
+    
     /********** Debug methods ***********/
     pub fn get_reg(&self, index: usize) -> RTYPE{
         self.stack.get(index)
@@ -701,14 +905,14 @@ impl Proc{
             DirectOp::LDNL => self.ldnl(value), // Load non local
             DirectOp::STNL => self.stnl(value), // store non local
             DirectOp::LDNLP=> self.ldnlp(value), // load non local pointer
-            DirectOp::PFIX => self.prefix(value),
-            DirectOp::NFIX => self.neg_prefix(value),
-            DirectOp::AJW  => self.ajw(value),
-            DirectOp::JUMP => self.jump(value),
-            DirectOp::CJ   => self.cj(value),
-            DirectOp::CALL => self.call(value),
-            DirectOp::EQC  => self.eqc(value),
-            DirectOp::OPR  => self.operate(value),
+            DirectOp::PFIX => self.prefix(value), // Push 4 bits onto operand register
+            DirectOp::NFIX => self.neg_prefix(value), // push 4 bits onto operand and complement
+            DirectOp::AJW  => self.ajw(value), // adjust workspace
+            DirectOp::JUMP => self.jump(value), // jump (deschedule)
+            DirectOp::CJ   => self.cj(value), // conditional jump
+            DirectOp::CALL => self.call(value), // call subroutine
+            DirectOp::EQC  => self.eqc(value), // equal check
+            DirectOp::OPR  => self.operate(value), // indirect operations
         };
         Ok(())
     }
