@@ -16,8 +16,15 @@ const HIGH_POINTER: i32 = 0x8000_0024;
 const LOW_POINTER: i32  = 0x8000_0028;
 const LOW_WORKSPACE:i32 = 0x8000_002C;
 */
+pub const REG_BASE: i32 = 0x1000_0000u32 as i32;
+pub const CLOCK_REG_0: i32 = REG_BASE + 0x00;
+pub const CLOCK_REG_1: i32 = REG_BASE + 0x00;
+pub const FRONT_PTR_0: i32 = REG_BASE + 0x00;
+pub const FRONT_PTR_1: i32 = REG_BASE + 0x00;
+pub const BACK_PTR_0: i32  = REG_BASE + 0x00;
+pub const BACK_PTR_1: i32  = REG_BASE + 0x00;
 
-
+pub const REGISTER_CACHE: i32 = 0x8000_002Cu32 as i32;
 
 pub struct Mem{
     contents: Rc<RefCell<HashMap<i32, i32>>>
@@ -51,6 +58,17 @@ impl Mem{
         let c = self.contents.borrow();
         if c.contains_key(&address){
             return c[&address];
+        }
+        0
+    }
+    
+    pub fn read_byte(&self, address: i32) -> u8{
+        let base_address = (address >> 2) << 2;
+        let offset = address & 0b11;
+        let c = self.contents.borrow();
+        if c.contains_key(&base_address){
+            let value = c[&base_address];
+            return ((value >> offset) & 0xFF) as u8;
         }
         0
     }

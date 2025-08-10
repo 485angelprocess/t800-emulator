@@ -1,6 +1,6 @@
 use crate::proc::DirectOp;
 
-pub fn parse_op_from_hex(v: u8) -> (DirectOp, i32){
+pub fn parse_op_from_hex(v: u8) -> (DirectOp, u8){
     let value = v & 0b1111;
     let o = v >> 4;
     
@@ -24,5 +24,5 @@ pub fn parse_op_from_hex(v: u8) -> (DirectOp, i32){
         _ => panic!("Invalid op code {}", o)
     };
     
-    (op, value as i32)
+    (op, value)
 }

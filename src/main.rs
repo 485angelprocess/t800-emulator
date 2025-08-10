@@ -1,44 +1,21 @@
-use std::rc::Rc;
-use std::cell::RefCell;
-
-use mem::Mem;
-use proc::DirectOp;
-
-use std::io;
+use proc::Proc;
 
 mod proc;
 mod mem;
-mod test;
-mod visual;
 mod parse;
-mod scheduler;
 
-mod channel;
-
-fn main()  -> Result<(), io::Error> {
+fn main() {
     println!("Hello, world!");
     
-    let mut tui = visual::ProcessorTui::new();
+    let mut proc = Proc::new(0x1000_0000);
     
-    let program = vec![
-        0x42,
-        0x44,
-        0x46,
-        0x47,
-        0x22,
-        0xF3
-    ];
+    println!("Initial stack: {:?}", proc.get_stack());
     
-    for p in program{
-        let inst = parse::parse_op_from_hex(p);
-        tui.upload_instruction(inst.0, inst.1);   
-    }
-    // tui.upload_instruction(DirectOp::LDC, 0x2);
-    // tui.upload_instruction(DirectOp::LDC, 0x4);
-    // tui.upload_instruction(DirectOp::LDC, 0x6);
-    // tui.upload_instruction(DirectOp::LDC, 0x7);
-    // tui.upload_instruction(DirectOp::PFIX, 0x2);
-    // tui.upload_instruction(DirectOp::OPR, 0x3);
+    let _result = proc.run(0x12);
     
-    return tui.run();
+    println!("After ldlp: {:?}", proc.get_stack());
+    
+    let _result = proc.run(0xF0);
+    
+    println!("After reverse: {:?}", proc.get_stack());
 }
