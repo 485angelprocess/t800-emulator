@@ -1,21 +1,57 @@
+use asm::Assemble;
+#[warn(unused_imports)]
+
 use proc::Proc;
 
 mod proc;
 mod mem;
 mod parse;
 
+mod asm;
+
+mod visual;
+
+use std::fs::File;
+use std::io::{self, BufRead};
+use std::path::Path;
+
+// The output is wrapped in a Result to allow matching on errors.
+// Returns an Iterator to the Reader of the lines of the file.
+fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
+where P: AsRef<Path>, {
+    let file = File::open(filename)?;
+    Ok(io::BufReader::new(file).lines())
+}
+
 fn main() {
-    println!("Hello, world!");
     
     let mut proc = Proc::new(0x1000_0000);
     
-    println!("Initial stack: {:?}", proc.get_stack());
+    let mut asm = Assemble::new();
+    asm.setup(&proc);
     
-    let _result = proc.run(0x12);
+    let mut machine: Vec<u8> = Vec::new();
     
-    println!("After ldlp: {:?}", proc.get_stack());
+    if let Ok(lines) = read_lines("lib/hello.s"){        
+        for l in lines{
+            let ml = l.unwrap();
+            match asm.read_line(ml.as_str()){
+                Some(values) => {
+                    for v in values{
+                        machine.push(v);
+                    }
+                },
+                None => ()
+            }
+        }
+    }
     
-    let _result = proc.run(0xF0);
-    
-    println!("After reverse: {:?}", proc.get_stack());
+    for i in 0..machine.len(){
+        match proc.run(machine[i]){
+            Err(e) => {
+                println!("Got error on line {}: {:#2x}: {:?}", i, machine[i], e);
+            },
+            _ => ()
+        }
+    }
 }

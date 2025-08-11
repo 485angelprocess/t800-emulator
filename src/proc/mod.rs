@@ -1,8 +1,8 @@
 mod secondary;
 
-use std::collections::HashMap;
+use std::collections::{hash_map::IntoKeys, HashMap};
 
-use secondary::define_wo_prefix;
+use secondary::{define_w_prefix, define_wo_prefix};
 
 use crate::{mem::*, parse::parse_op_from_hex};
 
@@ -12,11 +12,11 @@ type RTYPE = i32;
 type ATYPE = i32;
 
 // bits
-const GotoSNPBit: usize = 0x02;
-const HaltOnErrorBit: usize = 0x80;
-const ErrorFlag: usize = 0x8000_0000;
+const GO_TO_SNP_BIT: usize = 0x02;
+const HALT_ON_ERROR_BIT: usize = 0x80;
+const ERROR_FLAG: usize = 0x8000_0000;
 
-const NotProcess_p: i32 = 0x8000_0000u32 as i32;
+const NOT_PROCESS_P: i32 = 0x8000_0000u32 as i32;
 
 enum OpVal{
     Int(RTYPE),
@@ -25,7 +25,8 @@ enum OpVal{
 }
 
 #[repr(u8)]
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Debug)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum DirectOp{
     JUMP,
     LDLP,
@@ -52,7 +53,10 @@ enum IndirectOp{
 #[derive(Debug)]
 pub enum OpErr{
     Err,
-    Overflow
+    Overflow,
+    DivideByZero,
+    NotSingle,
+    Count
 }
 
 type OperandType = u8;
@@ -67,9 +71,10 @@ pub enum Flag{
 }
 
 #[derive(PartialEq)]
+#[repr(u8)]
 enum Priority{
-    Low,
-    High
+    Low = 1,
+    High = 0
 }
 
 struct ProcLibrary{
@@ -84,7 +89,7 @@ fn direct() -> [OpFn; 16]{
         // Jump
         Rc::new(|p, v|{
             let operand = p.shift_operand(v);
-            p.pc = p.pc + operand - 4;
+            p.pc = p.pc + operand;
             if p.priority() == Priority::Low{
                 p.deschedule();
             }
@@ -183,17 +188,17 @@ fn direct() -> [OpFn; 16]{
         }),
         // STNL
         Rc::new(|p, v|{
+            let b = p.stack.b();
             let a = p.stack.pop();
-            let b = p.stack.pop();
+            
             let offset = p.shift_operand(v) << 2;
             p.mem.write(a+offset, b);
-            Ok(OpVal::Null)
+            Ok(OpVal::Int(a+offset))
         }),
         // OPR
         Rc::new(|p, v|{
             let operand = p.shift_operand(v) as usize;
             let name = p.library.get_indirect_name(operand);
-            println!("Indirect instruction {}", name);
             p.library.get_indirect(operand).clone()(p)
         })
     ]
@@ -218,6 +223,10 @@ impl ProcLibrary{
     
     fn get_indirect(&self, opcode: usize) -> &IndirectOpFn{
         &self.indirect_fn[self.indirect_id[&opcode]]
+    }
+    
+    fn get_indirect_codes(&self) -> IntoKeys<usize, usize>{
+        self.indirect_id.clone().into_keys()
     }
     
     fn get_indirect_name(&self, opcode: usize) -> String{
@@ -257,7 +266,7 @@ impl Proc{
             error: 0,
             descriptor: 0,
             operand: RTYPE::default(),
-            mem: Mem::new(),
+            mem: Mem::new(DRAM_SIZE),
             library: ProcLibrary::new()
         };
         p.setup();
@@ -269,8 +278,29 @@ impl Proc{
         todo!("Error flag not implemented");
     }
     
+    pub fn program_counter(&self) -> i32{
+        return self.pc;
+    }
+    
+    pub fn workspace_pointer(&self) -> i32{
+        return self.workspace
+    }
+    
+    pub fn get_reg(&self, i: usize) -> i32{
+        self.stack.get(i)
+    }
+    
+    pub fn get_indirect_ops(&self) -> Vec<(String, usize)>{
+        let mut maps = Vec::new();
+        for op in self.library.get_indirect_codes(){
+            maps.push( (self.library.get_indirect_name(op), op) );
+        }
+        maps
+    }
+    
     fn setup(&mut self){
         define_wo_prefix(&mut self.library);
+        define_w_prefix(&mut self.library);
     }
     
     fn get_front_pointer(&self, pri: Priority) -> RTYPE{
@@ -301,11 +331,15 @@ impl Proc{
         }
     }
     
+    fn get_clock_register(&self, _pri:Priority) -> RTYPE{
+        0 // STUB
+    }
+    
     fn deschedule(&mut self){
         
         // We save data at a few locations
         self.mem.write(self.workspace - 4, self.pc);
-        if self.get_front_pointer(Priority::Low) == NotProcess_p{
+        if self.get_front_pointer(Priority::Low) == NOT_PROCESS_P{
             self.set_front_pointer(Priority::Low, self.workspace);
         }
         else{
@@ -313,7 +347,7 @@ impl Proc{
             self.mem.write(self.get_back_pointer(Priority::Low) - 8, self.workspace);
         }
         self.set_back_pointer(Priority::Low, self.workspace);
-        self.status = self.status | GotoSNPBit;
+        self.status = self.status | GO_TO_SNP_BIT;
         //self.mem.write(self.workspace - 8, );
     }
     
@@ -340,7 +374,7 @@ impl Proc{
     fn save_registers(&mut self){
         // Save registers space
         self.mem.write(REGISTER_CACHE, self.descriptor);
-        if self.descriptor != NotProcess_p + 1{
+        if self.descriptor != NOT_PROCESS_P + 1{
             self.mem.write(REGISTER_CACHE+4, self.pc);
             self.mem.write(REGISTER_CACHE+8, self.stack.a());
             self.mem.write(REGISTER_CACHE+12, self.stack.b());
@@ -354,7 +388,7 @@ impl Proc{
     fn restore_registers(&mut self){
         let wdesc = self.mem.read(REGISTER_CACHE);
         self.update_wdesc(wdesc);
-        if self.descriptor != NotProcess_p + 1{
+        if self.descriptor != NOT_PROCESS_P + 1{
             self.pc = self.mem.read(REGISTER_CACHE+4);
             self.stack.set(0, self.mem.read(REGISTER_CACHE+8));
             self.stack.set(1, self.mem.read(REGISTER_CACHE+12));
@@ -383,7 +417,7 @@ impl Proc{
             Priority::High => {
                 if wpri > 0{
                     // Add low priority to queue
-                    if self.get_front_pointer(Priority::Low) == NotProcess_p{
+                    if self.get_front_pointer(Priority::Low) == NOT_PROCESS_P{
                         self.set_front_pointer(Priority::Low, waddress);
                     }
                     else{
@@ -394,7 +428,7 @@ impl Proc{
                 }
                 else{
                     // Adding high priority to queue
-                    if self.get_front_pointer(Priority::High) == NotProcess_p{
+                    if self.get_front_pointer(Priority::High) == NOT_PROCESS_P{
                         self.set_front_pointer(Priority::High, waddress);
                     }
                     else{
@@ -409,7 +443,7 @@ impl Proc{
                     // Switch immediately to new high priority process
                     self.save_registers();
                     self.update_wdesc(wdesc);
-                    self.status = self.status & (ErrorFlag | HaltOnErrorBit);
+                    self.status = self.status & (ERROR_FLAG | HALT_ON_ERROR_BIT);
                     self.activate_process();
                 }
             }
@@ -420,7 +454,7 @@ impl Proc{
         let (op, v) = parse_op_from_hex(instruction);
         
         // TODO check how branch or others work
-        self.pc += 4;
+        self.pc += 1;
         
         let result = match self.library.direct[op as usize].clone()(self, v){
             Ok(v) => v,

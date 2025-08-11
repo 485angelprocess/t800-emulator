@@ -9,3 +9,30 @@ Debugger using `tui-rs`:
 ![](images/debugger.png)
 
 I've implemented all the direct instructions and am now going through the indirect ones, then will add the process manager.
+
+
+# Hello world
+
+I put a terminal register on `0x0001_0000`, this can be used to write a hello world program :).
+
+```
+; Hello world
+ldc 72 ; H
+ldc 65536 ; TERMINAL OUTPUT REGISTER
+stnl 0
+ldc 69 ; E
+rev
+stnl 0
+ldc 76 ; L
+rev
+stnl 0
+stnl 0
+ldc 79 ; O
+rev
+stnl 0
+ldc 10 ; \n
+rev
+stnl 0
+```
+
+This prints out "HELLO" to the terminal.

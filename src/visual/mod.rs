@@ -10,7 +10,7 @@ use crossterm::{
 use tui::{style::{Color, Style}, widgets::{Row, Table}};
 
 /* Making a cute visualizer for processor state */
-use crate::{mem::Mem, proc::Proc, DirectOp};
+use crate::{mem::Mem, proc::{DirectOp, Proc}};
 mod strings;
 
 
@@ -80,7 +80,7 @@ impl RowEntry for Instruction{
             v.push(" ".to_string());
         }
         
-        v.push(strings::direct_op_short_name(self.operation));
+        v.push(format!("{:?}", self.operation).to_lowercase());
         v.push(format!("{:#01X}", self.value));
         
         // Additional column
@@ -100,6 +100,10 @@ impl Instruction{
     
     fn toggle_breakpont(&mut self){
         self.breakpoint = !self.breakpoint;
+    }
+    
+    fn as_u8(&self) -> u8{
+        ((self.operation.clone() as u8) << 4) + (self.value as u8)
     }
 }
 
@@ -288,9 +292,8 @@ pub struct ProcessorTui{
 }
 
 impl ProcessorTui{
-    pub fn new() -> Self{
-        let m = Mem::new();
-        let p = Proc::new(m.clone());
+    pub fn new(p: Proc) -> Self{
+        let m = p.mem_reference();
         Self{
             mem: m.clone(),
             proc: p,
@@ -419,7 +422,8 @@ impl ProcessorTui{
     
     /// Clear process registers and program counter
     fn clear(&mut self){
-        self.proc.reset(0x8000);
+        //self.proc.reset(0x8000);
+        todo!("Clear not implemented");
         self.update();
     }
     
@@ -429,16 +433,17 @@ impl ProcessorTui{
         let inst = &mut self.instructions.contents;
         
         if pc < inst.len() as i32{
-            self.proc.run(inst[pc as usize].operation, inst[pc as usize].value);
+            let is = &inst[pc as usize];
+            
+            self.proc.run(is.as_u8());
         }
         
         self.update();
     }
     
     fn run_checked(&mut self, pc: usize) -> bool{
-        let op = self.instructions.contents[pc].operation;
-        let value = self.instructions.contents[pc].value;
-        if let Err(_e) = self.proc.run(op, value){
+        let is = &self.instructions.contents[pc];
+        if let Err(_e) = self.proc.run(is.as_u8()){
             // TODO print error
             return false;
         }
@@ -476,12 +481,10 @@ impl ProcessorTui{
     
     fn run_app<B:Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()>{
         
-        self.proc.set_workspace_pointer(0x8000);
+        //self.proc.set_workspace_pointer(0x8000);
         
         self.update();
         self.update_alias();
-        
-        
         
         loop{
             terminal.draw(|f| self.draw(f))?;
