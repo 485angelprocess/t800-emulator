@@ -26,6 +26,7 @@ fn prefix_constant(op: u8, v: i32) -> Vec<u8>{
 
 enum Token{
     Op( (String, i32) ),
+    OpPromise( (String, String) ),
     IndirectOp(String),
     Label(String)
 }
@@ -116,7 +117,11 @@ impl Assemble{
                 let v = self.iop[op];
                 Some(prefix_constant(opcode, v as i32))
             },
-            _ => None
+            Token::OpPromise( (op, label) ) => {
+                let opcode = self.op[op];
+                let c = self.labels[label];
+                Some(prefix_constant(opcode, c))
+            }
         }
     }
     
@@ -127,8 +132,8 @@ impl Assemble{
                 for t in tokens{
                     if let Some(prefixed_op) = self.load_token(&t){
                         for o in prefixed_op{
-                            ops.push(o);
                             self.line_number += 1;
+                            ops.push(o);
                         }
                     }
                 }
@@ -155,8 +160,13 @@ impl Assemble{
             return match v.parse::<i32>(){
                 Ok(num) => Some(Token::Op( (w, num) )),
                 Err(e) => {
-                    let label_address = self.labels[&v];
-                    Some(Token::Op( (w, label_address) ))
+                    if self.labels.contains_key(&v){
+                        let label_address = self.labels[&v];
+                        Some(Token::Op( (w, label_address) ))
+                    }
+                    else{
+                        Some(Token::OpPromise((w, v)))
+                    }
                 }
             };
         }
