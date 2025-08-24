@@ -5,7 +5,6 @@ use proc::Proc;
 
 mod proc;
 mod mem;
-mod parse;
 
 mod asm;
 

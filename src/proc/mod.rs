@@ -4,9 +4,9 @@ use std::collections::{hash_map::IntoKeys, HashMap};
 
 use secondary::{define_w_prefix, define_wo_prefix};
 
-use crate::{mem::*, parse::parse_op_from_hex};
-
 use std::rc::Rc;
+
+use crate::mem::*;
 
 type RTYPE = i32;
 type ATYPE = i32;
@@ -214,6 +214,7 @@ impl ProcLibrary{
         }
     }
     
+    /// Define new indirect function
     fn define_indirect<T: for<'a> Fn(&'a mut Proc) -> OpResult + 'static>(&mut self, name: &str, opcode: usize, f: T){
         let id = self.indirect_fn.len();
         self.indirect_id.insert(opcode, id);
@@ -221,14 +222,17 @@ impl ProcLibrary{
         self.indirect_name.push(name.to_string());
     }
     
+    /// Get function pointer of indirect function
     fn get_indirect(&self, opcode: usize) -> &IndirectOpFn{
         &self.indirect_fn[self.indirect_id[&opcode]]
     }
     
+    /// Get all indirect codes
     fn get_indirect_codes(&self) -> IntoKeys<usize, usize>{
         self.indirect_id.clone().into_keys()
     }
     
+    /// Get name of indirect operation
     fn get_indirect_name(&self, opcode: usize) -> String{
         self.indirect_name[self.indirect_id[&opcode]].clone()
     }
@@ -278,18 +282,22 @@ impl Proc{
         todo!("Error flag not implemented");
     }
     
+    /// Get program counter
     pub fn program_counter(&self) -> i32{
         return self.pc;
     }
     
+    /// Get active workspace pointer
     pub fn workspace_pointer(&self) -> i32{
         return self.workspace
     }
     
+    /// Get a register from the stack
     pub fn get_reg(&self, i: usize) -> i32{
         self.stack.get(i)
     }
     
+    /// Get names of indirect operations
     pub fn get_indirect_ops(&self) -> Vec<(String, usize)>{
         let mut maps = Vec::new();
         for op in self.library.get_indirect_codes(){
@@ -303,6 +311,7 @@ impl Proc{
         define_w_prefix(&mut self.library);
     }
     
+    /// Get the pointer at the front of the process queue
     fn get_front_pointer(&self, pri: Priority) -> RTYPE{
         match pri{
             Priority::Low => self.mem.read(FRONT_PTR_1),
@@ -310,6 +319,7 @@ impl Proc{
         }
     }
     
+    /// Set the pointer at the start of the process queue
     fn set_front_pointer(&mut self, pri: Priority, v: RTYPE){
         match pri{
             Priority::Low => self.mem.write(FRONT_PTR_1, v),
@@ -317,6 +327,7 @@ impl Proc{
         }
     }
     
+    /// Get the pointer at the back of the process queue
     fn get_back_pointer(&self, pri: Priority) -> RTYPE{
         match pri{
             Priority::Low => self.mem.read(BACK_PTR_1),
@@ -324,6 +335,7 @@ impl Proc{
         }
     }
     
+    /// Set the pointer at the back of the process queue
     fn set_back_pointer(&mut self, pri: Priority, v: RTYPE){
         match pri{
             Priority::Low => self.mem.write(BACK_PTR_1, v),
@@ -331,12 +343,15 @@ impl Proc{
         }
     }
     
+    /// Get the value of the clock register
     fn get_clock_register(&self, _pri:Priority) -> RTYPE{
         0 // STUB
     }
     
+    /// Check if the current process should be switched
+    /// If so, adds itself to the back of the process queue
+    /// and set status flag
     fn deschedule(&mut self){
-        
         // We save data at a few locations
         self.mem.write(self.workspace - 4, self.pc);
         if self.get_front_pointer(Priority::Low) == NOT_PROCESS_P{
@@ -451,7 +466,8 @@ impl Proc{
     }
     
     pub fn run(&mut self, instruction: u8) -> Result<(), OpErr>{
-        let (op, v) = parse_op_from_hex(instruction);
+        let op = instruction >> 4;
+        let v = instruction & 0xF;
         
         // TODO check how branch or others work
         self.pc += 1;
